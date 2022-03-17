@@ -6,14 +6,23 @@
  */
 
 
-// const fq = require('filequeue');
 const fs = require('fs')
 const path = require('path')
 const readline = require('readline')
 const TService = require("turndown")
 const TPlugin = require('turndown-plugin-gfm')
 const os = require("os");
-const Bagpipe = require('bagpipe');
+
+const gfm = new TService({
+  headingStyle: "atx",
+  bulletListMarker: "-",
+  codeBlockStyle: "fenced",
+  emDelimiter: "*",
+  linkStyle: "referenced",
+  linkReferenceStyle: "full",
+})
+gfm.use(TPlugin.gfm)
+gfm.use([TPlugin.tables, TPlugin.strikethrough])
 
 const tds = new TService({
   headingStyle: "atx",
@@ -23,8 +32,6 @@ const tds = new TService({
   linkStyle: "referenced",
   linkReferenceStyle: "full",
 })
-tds.use(TPlugin.gfm)
-tds.use([TPlugin.tables, TPlugin.strikethrough])
 // tds.addRule('pre2Code', {
 //   filter: ['pre'],
 //   replacement(content) {
@@ -42,11 +49,14 @@ let DIR_AC = path.resolve('../unity_doc/zh_anchor/')
 let TEMP = path.resolve('../unity_doc/html2md_temp/')
 let DIR_MD = path.resolve('../unity_doc/docs/')
 
-let fileNames = []
+// 专门测试某个文件
+let fileNames = [
+  // "class-TextureImporter",
+  // "AccelerationEvent",
+  // "Accessibility.VisionUtility.GetColorBlindSafePalette"
+]
 
 const anchors = {}
-
-var bagpipe = new Bagpipe(100);
 
 getAllAnchor(DIR_EN, DIR_AC)
 
@@ -138,6 +148,7 @@ function readDirectory(sourceDir, tempDir, destDir) {
     const tempPath = path.join(tempDir, fileInfo)
     const destPath = path.join(destDir, fileInfo.replace(".html", ".md"))
     const fileName = path.basename(fileInfo, path.extname(fileInfo))
+    let isScript = filePath.includes("ScriptReference")
     let states = fs.statSync(filePath)
     if (states.isFile() && fileInfo.endsWith('.html')) {
       if (fileNames.length !== 0 && !fileNames.includes(fileName)) {
@@ -152,11 +163,20 @@ function readDirectory(sourceDir, tempDir, destDir) {
       let reader = readline.createInterface(readStream)
       let isStart = false
       reader.on('line', function (line) {
-        if (line.includes('<div class="nextprev clear">')) {
-          isStart = false
-        }
-        if (line.includes('<h1>')) {
-          isStart = true
+        if (isScript) {
+          if (line.includes('<div class="footer-wrapper">')) {
+            isStart = false
+          }
+          if (line.includes('<div id="content-wrap" class="content-wrap opened-sidebar">')) {
+            isStart = true
+          }
+        } else {
+          if (line.includes('<div class="nextprev clear">')) {
+            isStart = false
+          }
+          if (line.includes('<h1>')) {
+            isStart = true
+          }
         }
         if (isStart) {
           writeStream.write(line + os.EOL)
@@ -165,11 +185,24 @@ function readDirectory(sourceDir, tempDir, destDir) {
       reader.on('close', function () {
         writeStream.close(function () {
           let html = fs.readFileSync(tempPath).toString()
-          let md = tds.turndown(html)
+
+          // 预先处理html
+          if (isScript) {
+            html = html.replaceAll('<a href="" class="switch-link gray-btn sbtn left hide">切换到手册</a>', '')
+            html = html.replaceAll('<pre class="codeExampleCS">', '<pre class="codeExampleCS"> {{CODE_START}}')
+            html = html.replaceAll('</pre>', '{{CODE_END}} </pre>')
+          }
+
+          // 对表格优化 换行处理
+          html = html.replaceAll('<br>', '{{BR}}')
+          // html = html.replaceAll('<br><br>', '{{BR}}{{BR}}')
+          // html = html.replaceAll('、<br>', '、{{BR}}')
+
+          let md = isScript ? tds.turndown(html) : gfm.turndown(html)
 
           // md = md.replaceAll('.html', '.md')
           md = md.replaceAll('../StaticFilesManual/', 'https://docs.unity3d.com/cn/current/StaticFilesManual/')
-          md = md.replaceAll('../ScriptReference/', 'https://docs.unity3d.com/cn/current/ScriptReference/')
+          // md = md.replaceAll('../ScriptReference/', 'https://docs.unity3d.com/cn/current/ScriptReference/')
           md = md.replaceAll('../StaticFiles/', 'https://docs.unity3d.com/cn/current/StaticFiles/')
           md = md.replaceAll('../uploads/', 'https://docs.unity3d.com/cn/current/uploads/')
           md = md.replaceAll('https://docs.unity3d.com/Manual/', '')
@@ -177,9 +210,20 @@ function readDirectory(sourceDir, tempDir, destDir) {
           md = md.replaceAll(/]: .+\.html/g, function (rep) {
             return rep.replaceAll('.html', '.md')
           })
+
+          md = md.replaceAll('&amp;', '&')
+
           // 把 < > 转义
-          md = md.replaceAll('<', '&lt;')
-          md = md.replaceAll('>', '&gt;')
+          if (!isScript) {
+            md = md.replaceAll('<', '&lt;')
+            md = md.replaceAll('>', '&gt;')
+          }
+          if (isScript) {
+            md = md.replaceAll('\\[', '[')
+            md = md.replaceAll('\\]', ']')
+            md = md.replaceAll('\\_', '_')
+          }
+
           md = md.replaceAll(/(]: (.+\.md)?#)(.+)/g, function (rep, $1, $2, tag) {
 
             let name = fileName
@@ -223,6 +267,14 @@ function readDirectory(sourceDir, tempDir, destDir) {
             })
             return rep
           })
+
+          md = md.replaceAll('{{CODE_START}}', '```csharp')
+          md = md.replaceAll('{{CODE_END}}', '```')
+          // 对表格进行优化
+          md = md.replaceAll('{{BR}}', '<br/>')
+          // 对子属性的选项表格
+          md = md.replaceAll('|  | ', '|  -> ')
+
           fs.writeFileSync(destPath, md)
         })
       })

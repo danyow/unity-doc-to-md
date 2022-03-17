@@ -2,20 +2,10 @@
 # yarn lockfile v1
 
 
-bagpipe@^0.3.5:
-  version "0.3.5"
-  resolved "https://registry.yarnpkg.com/bagpipe/-/bagpipe-0.3.5.tgz#e341d164fcb24cdf04ea7e05b765ec10c8aea6a1"
-  integrity sha1-40HRZPyyTN8E6n4Ft2XsEMiupqE=
-
 domino@^2.1.6:
   version "2.1.6"
   resolved "https://registry.yarnpkg.com/domino/-/domino-2.1.6.tgz#fe4ace4310526e5e7b9d12c7de01b7f485a57ffe"
   integrity sha512-3VdM/SXBZX2omc9JF9nOPCtDaYQ67BGp5CoLpIQlO2KCAPETs8TcDHacF26jXadGbvUteZzRTeos2fhID5+ucQ==
-
-filequeue@^0.5.0:
-  version "0.5.0"
-  resolved "https://registry.yarnpkg.com/filequeue/-/filequeue-0.5.0.tgz#f0048a5af4530447dacef06c4868c50a11406179"
-  integrity sha1-8ASKWvRTBEfazvBsSGjFChFAYXk=
 
 turndown-plugin-gfm@^1.0.2:
   version "1.0.2"

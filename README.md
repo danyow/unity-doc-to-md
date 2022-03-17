@@ -7,10 +7,10 @@
 
 ## 创建四个文件夹
 
-`unity/zh_2020`
-`unity/zh_anchor`
-`unity/html2md_temp`
-`unity/docs`
+`unity_doc/zh_2020`
+`unity_doc/zh_anchor`
+`unity_doc/html2md_temp`
+`unity_doc/docs`
 
 ## 确保自己的 `nodejs` 环境为 `linux`, 并解开限制
 
