@@ -3,6 +3,7 @@
  */
 
 const version = '2022.1'
+const baseUrl = 'https://docs.unity3d.com/cn/' + version
 const fs = require('fs')
 const path = require('path')
 const readline = require('readline')
@@ -44,18 +45,31 @@ const tds = new TService({
 let DIR_EN = path.resolve('../unity_doc/zh_' + version + '/')
 let DIR_AC = path.resolve('../unity_doc/zh_anchor/')
 let TEMP = path.resolve('../unity_doc/html2md_temp/')
-let DIR_MD = path.resolve('../unity_doc/docs/')
+let DIR_MD = path.resolve('../doc-unity-manual/docs/')
 
 // 专门测试某个文件
-let fileNames = [
+const fileNames = [
   // "class-TextureImporter",
   // "AccelerationEvent",
-  // "Accessibility.VisionUtility.GetColorBlindSafePalette"
-]
+  // "class-GUISkin"
+  // "UnityAnalyticsTerminology"
+];
 
-let excludeFileNames = [
+const excludeFileNames = [
   "30_search"
-]
+];
+
+"[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad"
+'[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad&sa=D&source=docs&ust=1636108271363000&usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN](https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad'
+
+const mdNameModifyList = {
+  "CompilationPipeline.GetAssemblyDefinitionPlatforms": "Compilation.CompilationPipeline.GetAssemblyDefinitionPlatforms",
+  // "UISystem" : "com.unity.modules.ui",
+  // "UISystem" : "UI-system-compare",
+  "UISystem": "UIElements",
+  "class-PlayerSettingstvOS": "tvos-player-settings",
+  "IL2CPP-BytecodeStripping": "ManagedCodeStripping",
+};
 
 const anchors = {}
 
@@ -198,35 +212,82 @@ function readDirectory(sourceDir, tempDir, destDir) {
             html = html.replaceAll('<pre class="codeExampleCS">', '<pre class="codeExampleCS"> {{CODE-START}}')
             html = html.replaceAll('</pre>', '{{CODE-END}} </pre>')
           }
+          // 有些引用是 ScriptRef 和 #ScriptRef
+          html = html.replaceAll('#ScriptRef:', '../ScriptReference/')
+          html = html.replaceAll('ScriptRef:', '../ScriptReference/')
+          // 邮箱
+          html = html.replaceAll('https://docs.unity3d.com/Manual/mailto:assetstore@unity3d.com.html', 'mailto:assetstore@unity3d.com')
+          if (version.includes('2022')) {
+            // SpriteAtlas -> SpriteAtlasV2
+            html = html.replaceAll('/SpriteAtlas.html', '/SpriteAtlasV2.html')
+          }
+
+
+
           // 对表格优化 换行处理
           html = html.replaceAll('<br>', '{{BR}}')
 
-          let md = isScript ? tds.turndown(html) : gfm.turndown(html)
+          // <table>\n<colgroup>\n<col style="text-align:left;">\n<col style="text-align:left;">\n<\/colgroup>\n((.|\n)*?)<tbody>
 
-          // md = md.replaceAll('.html', '.md')
-          md = md.replaceAll('../StaticFilesManual/', 'https://docs.unity3d.com/cn/' + version + '/StaticFilesManual/')
-          md = md.replaceAll('../StaticFiles/', 'https://docs.unity3d.com/cn/' + version + '/StaticFiles/')
-          md = md.replaceAll('../uploads/', 'https://docs.unity3d.com/cn/' + version + '/uploads/')
+          // 如果 </colgroup> 和 <tbody> 之间有 <thead> 就是带 title 的表格
+          html = html.replaceAll(/<colgroup>\n((.|\n)*?)<tbody>/g, function (rep, $1) {
+            if ($1.includes('<thead>')){
+              return rep
+            }
+            // 判断有多少行
+
+            let col_count = rep.match(/\n/g).length - 3
+            if (col_count > 0) {
+              let thead = '<thead>\n<tr>\n'
+              for (let index = 0; index < col_count; index++) {
+                if (index == 0) {
+                  thead += '\t<th style="text-align:left;"><strong>Topic</strong></th>\n'
+                } else{
+                  thead += '\t<th style="text-align:left;"><strong>描述</strong></th>\n'
+                }
+              }
+              thead += '</tr>\n</thead>\n\n\<tbody>\n'
+              rep = rep.replaceAll('<tbody>', thead)
+            }
+
+            return rep
+          })
+
+          // let noTitle = false
+          // if (html.includes('<table>') && !html.includes('<thead>')) {
+          //   noTitle = true
+          // }
+          let md = gfm.turndown(html)
+
+
+          // 对源路径映射
+          md = md.replaceAll('../StaticFilesManual/', baseUrl + '/StaticFilesManual/')
+          md = md.replaceAll('../StaticFiles/', baseUrl + '/StaticFiles/')
+          md = md.replaceAll('../uploads/', baseUrl + '/uploads/')
 
           // 对 源路径 不同替换
           if (isScript) {
             md = md.replaceAll('https://docs.unity3d.com/ScriptReference/', '')
             md = md.replaceAll('../ScriptReference/', '')
-            md = md.replaceAll('https://docs.unity3d.com/Manual/', 'https://docs.unity3d.com/Manual/')
-            md = md.replaceAll('../Manual/', 'https://docs.unity3d.com/Manual/')
+            md = md.replaceAll('https://docs.unity3d.com/Manual/', baseUrl + '/Manual/')
+            md = md.replaceAll('../Manual/', baseUrl + '/Manual/')
+            // 但把搜索相关置换回来
+            // md = md.replaceAll('30_search', 'https://danyow.cn/search')
+            md = md.replaceAll('30_search', baseUrl + '/ScriptReference/30_search')
           } else {
-            md = md.replaceAll('https://docs.unity3d.com/ScriptReference/', 'https://docs.unity3d.com/ScriptReference/')
-            md = md.replaceAll('../ScriptReference/', 'https://docs.unity3d.com/ScriptReference/')
+            md = md.replaceAll('https://docs.unity3d.com/ScriptReference/', baseUrl + '/ScriptReference/')
+            md = md.replaceAll('../ScriptReference/', baseUrl + '/ScriptReference/')
             md = md.replaceAll('https://docs.unity3d.com/Manual/', '')
             md = md.replaceAll('../Manual/', '')
+
+            md = md.replaceAll('30_search', baseUrl + '/Manual/30_search')
           }
           // md = md.replaceAll('../ScriptReference/', 'https://docs.unity3d.com/cn/' + version + '/ScriptReference/')
           // 把 `Manual` 引用带` html `转为 `md`
           md = md.replaceAll(/]: .+\.html/g, function (rep) {
 
             // 如果里面的url 包括了 Manual 或者 ScriptReference 就不能转换为 md
-            // 以及 30_search
-            if (rep.includes('/Manual/') || rep.includes('/ScriptReference/') || rep.includes('/30_search/')) {
+            if (rep.includes('/Manual/') || rep.includes('/ScriptReference/')) {
               return rep
             }
             return rep.replaceAll('.html', '.md')
@@ -256,10 +317,17 @@ function readDirectory(sourceDir, tempDir, destDir) {
           })
 
           // 对 ![](http://xxx.xx) -> ![xxx.xx](http://xxx.xx)
-          md = md.replaceAll(/\!\[\]\(.*?\)/g, function (rep) {
-            let url = rep.replaceAll('![](', '').replaceAll(')', '')
-            let name = path.basename(url)
+          md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1, $2) {
+            let name = path.basename($1)
             rep = rep.replaceAll('![]', '![' + name + ']')
+            return rep
+          })
+
+          // 替换
+          md = md.replaceAll(/]: (.*?)\.md/g, function (rep, $1) {
+            if (Object.keys(mdNameModifyList).includes($1)) {
+              return rep.replaceAll($1, mdNameModifyList[$1])
+            }
             return rep
           })
 
@@ -270,6 +338,9 @@ function readDirectory(sourceDir, tempDir, destDir) {
               name = rep.replaceAll(/]: (.+)\.md.+/g, function (_, $1) {
                 return $1
               })
+              if (Object.keys(mdNameModifyList).includes(name)) {
+                name = mdNameModifyList[name]
+              }
             }
             rep = rep.replaceAll(/#[\w\-]+/g, function (_) {
               // // 判断这个单词在不在不可分割的表里面
