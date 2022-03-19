@@ -22,25 +22,6 @@ const gfm = new TService({
 gfm.use(TPlugin.gfm)
 gfm.use([TPlugin.tables, TPlugin.strikethrough])
 
-const tds = new TService({
-  headingStyle: "atx",
-  bulletListMarker: "-",
-  codeBlockStyle: "fenced",
-  emDelimiter: "*",
-  linkStyle: "referenced",
-  linkReferenceStyle: "full",
-})
-// tds.addRule('pre2Code', {
-//   filter: ['pre'],
-//   replacement(content) {
-//     const len = content.length
-//     // 除了pre标签，里面是否还有code标签包裹，有的话去掉首尾的`（针对微信文章）
-//     const isCode = content[0] === '`' && content[len - 1] === '`'
-//     const result = isCode ? content.substr(1, len - 2) : content
-//     return '```\n' + result + '\n```\n'
-//   }
-// })
-
 //要遍历的文件夹所在的路径
 let DIR_EN = path.resolve('../unity_doc/zh_' + version + '/')
 let DIR_AC = path.resolve('../unity_doc/zh_anchor/')
@@ -59,8 +40,8 @@ const excludeFileNames = [
   "30_search"
 ];
 
-"[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad"
-'[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad&sa=D&source=docs&ust=1636108271363000&usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN](https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad'
+// "[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad"
+// '[https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad&sa=D&source=docs&ust=1636108271363000&usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN](https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad'
 
 const mdNameModifyList = {
   "CompilationPipeline.GetAssemblyDefinitionPlatforms": "Compilation.CompilationPipeline.GetAssemblyDefinitionPlatforms",
@@ -69,7 +50,15 @@ const mdNameModifyList = {
   "UISystem": "UIElements",
   "class-PlayerSettingstvOS": "tvos-player-settings",
   "IL2CPP-BytecodeStripping": "ManagedCodeStripping",
+  "class-PlayerSettingsStandalone": "404",
+  "PostProcessing-ColorGrading": "404",
+  "AssigningIcons": "404",
+  "PresetLibraries": "404",
+  "ParticleSystemJobs.ParticleSystemJobData": "404",
+  "ExistingPlasticRepo": "404",
 };
+
+const filePaths = {}
 
 const anchors = {}
 
@@ -222,7 +211,12 @@ function readDirectory(sourceDir, tempDir, destDir) {
             html = html.replaceAll('/SpriteAtlas.html', '/SpriteAtlasV2.html')
           }
 
+          // #udp-distribution.html#languages
+          html = html.replaceAll('#udp-distribution.html#languages', '../Manual/udp-distribution.html#languages')
 
+          // %5Bhttps://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad)
+          // https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN
+          html = html.replaceAll('%5Bhttps://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad)', 'https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN')
 
           // 对表格优化 换行处理
           html = html.replaceAll('<br>', '{{BR}}')
@@ -253,12 +247,7 @@ function readDirectory(sourceDir, tempDir, destDir) {
             return rep
           })
 
-          // let noTitle = false
-          // if (html.includes('<table>') && !html.includes('<thead>')) {
-          //   noTitle = true
-          // }
           let md = gfm.turndown(html)
-
 
           // 对源路径映射
           md = md.replaceAll('../StaticFilesManual/', baseUrl + '/StaticFilesManual/')
