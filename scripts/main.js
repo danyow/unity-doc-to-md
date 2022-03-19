@@ -26,10 +26,10 @@ gfm.use([TPlugin.tables, TPlugin.strikethrough])
 const BASE_PATH = path.resolve('../unity_doc/', LANGUAGE, VERSION)
 
 //要遍历的文件夹所在的路径
-const ROOT_PATH = path.join(BASE_PATH, 'ROOT')
-const ANCH_PATH = path.join(BASE_PATH, 'ANCH')
-const TEMP_PATH = path.join(BASE_PATH, 'TEMP')
-const MARK_PATH = path.join(BASE_PATH, 'MARK')
+const ROOT_PATH = path.join(BASE_PATH, 'root')
+const ANCH_PATH = path.join(BASE_PATH, 'anchor')
+const TEMP_PATH = path.join(BASE_PATH, 'temp')
+const MARK_PATH = path.join(BASE_PATH, 'markdown')
 
 // 专门测试某个文件
 const debugFiles = [
@@ -59,30 +59,112 @@ const mdNameModifyList = {
 };
 
 async function main() {
-  let manualURL = BASEURL + '/Manual/docdata/toc.js'
-  let scriptURL = BASEURL + '/ScriptReference/docdata/toc.js'
+  let manualURL = BASEURL + '/Manual/docdata/toc.json'
+  let scriptURL = BASEURL + '/ScriptReference/docdata/toc.json'
   let mResult = await httpRequest.sendHttpRequest(manualURL)
   let sResult = await httpRequest.sendHttpRequest(scriptURL)
-  let mString = mResult.data.replaceAll('toc = ', '').replaceAll(';', '')
-  let sString = sResult.data.replaceAll('var toc = ', '').replaceAll(';', '')
-  let manualData = eval('(' + mString + ')')
-  let scriptData = eval('(' + sString + ')')
+  let manualData = JSON.parse(mResult.data)
+  let scriptData = JSON.parse(sResult.data)
 
-  fileToPath.checkDirectory(ROOT_PATH, ANCH_PATH, function (fileName) {
-    if ((debugFiles.length !== 0 && !debugFiles.includes(fileName)) || (excludeFileNames.length > 0 && excludeFileNames.includes(fileName))) {
-      return false
-    }
-    return true
-  }, function (html) {
-    if (html.includes('<div class="message message-error mb20">')) {
-      return false
-    }
-    return true
-  })
+  let manualList = toList(manualData, 'Manual')
+  let scriptList = toList(scriptData, 'ScriptReference')
 
+  copyFiles(manualList, 'Manual')
+  copyFiles(scriptList, 'ScriptReference')
 
+  // 对拷贝过后的文件目录转md
 }
 
 main().then(_ => {
 })
 
+
+// 转换为锚点可读
+function transformToAnchor(link) {
+  // 拆分驼峰
+  let anchor = link.replace(/([a-z])([A-Z])/g, '$1 $2')
+  anchor = anchor.replaceAll(/\w+/g, function (rep) {
+    return rep.toLocaleLowerCase()
+  })
+  // 把所有空格变成-
+  anchor = anchor.replaceAll(/\s+/g, function () {
+    return '-'
+  })
+  // 把 # ( ) . / : " < > 换成 空
+  anchor = anchor.replaceAll(/[#().\/:"<>]+/g, function () {
+    return '-'
+  })
+  return anchor
+}
+
+// 遍历 附带 前几次的数据 通过 callback 自定义
+function each(configs, preObjects, callback) {
+  let object = callback(configs, preObjects)
+  if (configs.children && configs.children.length > 0) {
+    for (let index = 0; index < configs.children.length; index++) {
+      let objects = [...preObjects]
+      objects.push(object)
+      each(configs.children[index], objects, callback)
+    }
+  }
+}
+
+// 从数据里面得到关于某个键的值
+function getValues(objs, action) {
+  let values = []
+  for (let index = 0; index < objs.length; index++) {
+    values.push(action(objs[index]))
+  }
+  return values
+}
+
+// 把对应数据转为数组
+function toList(database, root) {
+  let dataList = []
+  each(database, [], function (config, list) {
+    const link = config.link
+    const title = config.title
+    const anchor_link = transformToAnchor(config.link)
+    const anchor_title = transformToAnchor(config.title)
+    const links = getValues(list, (obj) => obj.link)
+    const titles = getValues(list, (obj) => obj.title)
+    const anchor_links = getValues(list, (obj) => obj.anchor_link)
+    const anchor_titles = getValues(list, (obj) => obj.anchor_title)
+    let data = {
+      source: path.join(ROOT_PATH, root, config.link + '.html'),
+      target: path.join(TEMP_PATH, root, ...anchor_titles, anchor_title + '.html'),
+      link: link,
+      title: title,
+      links: links,
+      titles: titles,
+      anchor_link: anchor_link,
+      anchor_title: anchor_title,
+      anchor_links: anchor_links,
+      anchor_titles: anchor_titles,
+    }
+    dataList.push(data)
+    return data
+  })
+  return dataList
+}
+
+// 依据数据数组 转换文件到对应目录里面去
+function copyFiles(list, root) {
+  let nonExistent = 0
+  for (let index = 0; index < list.length; index++) {
+    let manual = list[index]
+    // let sourcePath = path.join(ROOT_PATH, root, manual.link + '.html')
+    // let manualPath = path.join(TEMP_PATH, root, ...manual.anchor_titles, manual.anchor_title + '.html')
+
+    if (fs.existsSync(manual.source)) {
+      if (!fs.existsSync(path.dirname(manual.target))) {
+        fs.mkdirSync(path.dirname(manual.target), {recursive: true})
+      }
+      fs.copyFileSync(manual.source, manual.target)
+    } else {
+      nonExistent++
+      console.log(manual)
+    }
+  }
+  console.log('不存在:' + nonExistent, '总计:' + list.length)
+}
