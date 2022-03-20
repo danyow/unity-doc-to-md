@@ -1,4 +1,5 @@
 const Path = require("path");
+const fs = require("fs");
 
 // 转换为锚点可读
 exports.transformToAnchor = function (link) {
@@ -40,13 +41,23 @@ exports.each = function (configs, preObjects, callback) {
 }
 
 
-// to url
-exports.baseURL = function (language, version, root = '', args = '') {
-  return 'https://docs.unity3d.com/' + language + '/' + version + '/' + root + args
+exports.writeFile = function (path, content = '', callback) {
+  if (!fs.existsSync(Path.dirname(path))) {
+    fs.mkdirSync(Path.dirname(path), {recursive: true})
+  }
+  if (content === '') {
+    fs.writeFileSync(path, content, 'utf-8')
+    if (callback) {
+      callback()
+    }
+  } else {
+    fs.writeFile(path, content, 'utf-8', callback)
+  }
 }
 
-// 返回路径 但是没有
-exports.currentBaseURL = function (language, version, root = '', args = '') {
+
+// to url
+exports.baseURL = function (language, version, root = '', args = '') {
   return 'https://docs.unity3d.com/' + language + '/' + version + '/' + root + args
 }
 

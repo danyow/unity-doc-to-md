@@ -29,13 +29,19 @@ const gfm = new TService({
 gfm.use(TPlugin.gfm)
 gfm.use([TPlugin.tables, TPlugin.strikethrough])
 
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function main() {
   request(function (linkConfigs) {
     toSimpleList(linkConfigs, function (simpleList) {
       toComplexList(simpleList, function (complexList) {
-        handleHtml(complexList, function () {
-          console.log('全部转换完成!!')
+        writeHtml(complexList, function (complexList) {
+          handleHtml(complexList, function (complexList) {
+            writeMarkdown(complexList, function (complexList) {
+              handleMarkdown(complexList, function (complexList) {
+                console.log('全部转换完成!!')
+              })
+            })
+          })
         })
       })
     })
@@ -44,6 +50,7 @@ function main() {
 
 main()
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 准备网络请求
 function request(callback) {
   const languages = ['cn']
@@ -79,6 +86,7 @@ function request(callback) {
   })
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function toSimpleList(linkConfigs, callback) {
   // 首先简单处理
   let simpleList = {}
@@ -104,7 +112,7 @@ function toSimpleList(linkConfigs, callback) {
   callback(simpleList)
 }
 
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 准备转换成数组
 function toComplexList(simpleList, callback) {
   // 然后复杂处理 因为有涉及到 锚点
@@ -124,9 +132,11 @@ function toComplexList(simpleList, callback) {
     const anchor_titles = titles.map(Tools.transformToAnchor)
     const url = Path.join(...anchor_links, anchor_link + '.md')
     const source = Tools.basePath(language, version, root, link + '.html')
-    const temp = Tools.basePath('temp', language, version, root, ...anchor_links, anchor_link + '.html')
-    // const target = Tools.basePath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
-    const target = Tools.selfPath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
+    const preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_links, anchor_link + '.html')
+    const postHtml = Tools.basePath('html-post', language, version, root, ...anchor_links, anchor_link + '.html')
+    const preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_links, anchor_link + '.md')
+    // const postMark = Tools.basePath('mark-post', language, version, root, ...anchor_links, anchor_link + '.md')
+    const postMark = Tools.selfPath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
 
 
     let anchors = []
@@ -150,6 +160,7 @@ function toComplexList(simpleList, callback) {
         }
         // 直接返回一个复杂数据
         callback({
+          anchors: anchors,
           language: language,
           version: version,
           root: root,
@@ -163,9 +174,10 @@ function toComplexList(simpleList, callback) {
           anchor_titles: anchor_titles,
           url: url,
           source: source,
-          temp: temp,
-          target: target,
-          anchors: anchors,
+          preHtml: preHtml,
+          postHtml: postHtml,
+          preMark: preMark,
+          postMark: postMark,
         })
       } else {
         console.log('文件不存在', source)
@@ -195,20 +207,16 @@ function toComplexList(simpleList, callback) {
   }
 
   handleQueue.drain(() => {
-    console.log(complexList)
     callback(complexList)
   })
 }
 
-
-function handleHtml(complexList, handleCallback) {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 预处理 html 文件
+function writeHtml(complexList, writeCallback) {
   const handleQueue = Async.queue(function (complex, callback) {
-    // 判断临时文件是否存在
-    if (!FS.existsSync(complex.temp)) {
-      FS.mkdirSync(Path.dirname(complex.temp), {recursive: true})
-      FS.writeFileSync(complex.temp, '')
-    }
-    let writeStream = FS.createWriteStream(complex.temp)
+    Tools.writeFile(complex.preHtml, '')
+    let writeStream = FS.createWriteStream(complex.preHtml, 'utf-8')
     let readStream = FS.createReadStream(complex.source, 'utf-8')
     let reader = ReadLine.createInterface(readStream)
     let startFlag = false
@@ -238,147 +246,7 @@ function handleHtml(complexList, handleCallback) {
       }
     })
     reader.on('close', function () {
-      writeStream.close(function () {
-        FS.readFile(complex.temp, 'utf-8', function (err, html) {
-          // 有时候会莫名起码多个\r进去
-          html = html.replaceAll('\r\n', '\n')
-          // 有些引用是 ScriptRef 和 #ScriptRef
-          html = html.replaceAll('#ScriptRef:', '../ScriptReference/')
-          html = html.replaceAll('ScriptRef:', '../ScriptReference/')
-          // 邮箱
-          html = html.replaceAll('https://docs.unity3d.com/Manual/mailto:assetstore@unity3d.com.html', 'mailto:assetstore@unity3d.com')
-          if (complex.version.includes('2022')) {
-            // SpriteAtlas -> SpriteAtlasV2
-            html = html.replaceAll('/SpriteAtlas.html', '/SpriteAtlasV2.html')
-          }
-
-          // #udp-distribution.html#languages
-          html = html.replaceAll('#udp-distribution.html#languages', '../Manual/udp-distribution.html#languages')
-
-          // 替换 url
-          html = html.replaceAll(
-            '%5Bhttps://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad)',
-            'https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN'
-          )
-
-          // 对表格优化 换行处理
-          html = html.replaceAll('<br>', '{{BR}}')
-
-          // 如果 </colgroup> 和 <tbody> 之间有 <thead> 就是带 title 的表格
-          html = html.replaceAll(/<colgroup>\n((.|\n)*?)<tbody>/g, function (rep, $1) {
-            if ($1.includes('<thead>')) {
-              return rep
-            }
-            // 判断有多少行
-
-            let col_count = rep.match(/\n/g).length - 3
-            if (col_count > 0) {
-              let thead = '<thead>\n<tr>\n'
-              for (let index = 0; index < col_count; index++) {
-                if (index == 0) {
-                  thead += '\t<th style="text-align:left;"><strong>Topic</strong></th>\n'
-                } else {
-                  thead += '\t<th style="text-align:left;"><strong>描述</strong></th>\n'
-                }
-              }
-              thead += '</tr>\n</thead>\n\n\<tbody>\n'
-              rep = rep.replaceAll('<tbody>', thead)
-            }
-            return rep
-          })
-
-          if (complex.root === 'ScriptReference') {
-            html = html.replaceAll('<a href="" class="switch-link gray-btn sbtn left hide">切换到手册</a>', '')
-            html = html.replaceAll('<pre class="codeExampleCS">', '<pre class="codeExampleCS"> {{CODE-START}}')
-            html = html.replaceAll('</pre>', '{{CODE-END}} </pre>')
-          }
-
-          //////////////////////////////////////////////////////////////////////////////
-          let md = gfm.turndown(html)
-          // const baseURL = Tools.baseURL(complex.language, complex.version)
-          // md = md.replaceAll('../StaticFilesManual/', baseURL + '/StaticFilesManual/')
-          // md = md.replaceAll('../StaticFiles/', baseURL + '/StaticFiles/')
-          // md = md.replaceAll('../uploads/', baseURL + '/uploads/')
-
-          // 转义 &
-          md = md.replaceAll('&amp;', '&')
-
-          // 把 < > 转义
-          if (complex.root === 'Manual') {
-            md = md.replaceAll('<', '&lt;')
-            md = md.replaceAll('>', '&gt;')
-          }
-          if (complex.root === 'ScriptReference') {
-            md = md.replaceAll('\\[', '[')
-            md = md.replaceAll('\\]', ']')
-          }
-
-          // \*\*(.*?)\*\*
-          // 对多余 \# 删除
-          md = md.replaceAll('\\# ', '')
-          // 对双下滑线的进行 ** 处理
-          md = md.replaceAll('\\_\\_', '**')
-          md = md.replaceAll(/\*\*(.*?)\*\*/g, function (rep) {
-            // 前后剔除空格后 最后面补一个空格
-            return rep.trim() + ''
-          })
-
-          // 对 ![](http://xxx.xx) -> ![xxx.xx](http://xxx.xx)
-          md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1) {
-            let name = Path.basename($1)
-            rep = rep.replaceAll('![]', '![' + name + ']')
-            return rep
-          })
-
-          md = md.replaceAll('{{CODE-START}}', '```csharp')
-          md = md.replaceAll('{{CODE-END}}', '```')
-          // 对表格进行优化
-          md = md.replaceAll('{{BR}}', '<br/>')
-          // 对子属性的选项表格
-          md = md.replaceAll('|  | ', '|  -> ')
-
-
-          // 对链接优化
-          // 首先对链接统一化
-          // md = md.replaceAll(Too + '/StaticFilesManual/')
-
-          // 针对锚点 有 # 号
-          md = md.replaceAll(/(]: (.+\.html)?#)(.+)/g, function (rep, $1, targetFile, tag) {
-            // 首先判断 targetFile 有没有值
-            if (targetFile !== undefined) {
-              if (targetFile.startsWith('http://') || targetFile.startsWith('https://')) {
-                // 完整网站的不管
-                return rep
-              }
-              let targetName = targetFile.replaceAll(Path.extname(targetFile), '')
-              // 说明用的是别人的锚点
-              let targetComplex = complexList[complex.language][complex.version][complex.root].find(function (t) {
-                return t.link == targetName
-              })
-              if (targetComplex === undefined) {
-                // 没有目标文件 返回在线地址
-                return ']: ' + Tools.baseURL(complex.language, complex.version, complex.root, '/' + targetFile) + '#' + tag
-              }
-              if (targetComplex.anchors[tag] === undefined) {
-                // 不存在这个锚点
-                return ']: ' + targetComplex.url
-              }
-              return ']: ' + targetComplex.url + '#' + targetComplex.anchors[tag]
-            }
-            if (complex.anchors[tag] === undefined) {
-              // 本文件都不存在这个锚点
-              return ']: ' + complex.url
-            }
-            return ']: ' + '#' + complex.anchors[tag]
-          })
-
-
-          if (!FS.existsSync(complex.target)) {
-            FS.mkdirSync(Path.dirname(complex.target), {recursive: true})
-          }
-          FS.writeFile(complex.target, md, 'utf-8', callback)
-        })
-      })
+      writeStream.close(callback)
     })
   }, 1)
   for (const language in complexList) {
@@ -396,7 +264,310 @@ function handleHtml(complexList, handleCallback) {
   }
 
   handleQueue.drain(() => {
-    console.log(complexList)
+    writeCallback(complexList)
+  })
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 后处理 html
+function handleHtml(complexList, handleCallback) {
+
+  const handleQueue = Async.queue(function (complex, callback) {
+
+    if (!FS.existsSync(complex.preHtml)) {
+      console.log('')
+    }
+
+    FS.readFile(complex.preHtml, 'utf-8', function (err, html) {
+      // 有时候会莫名起码多个\r进去
+      html = html.replaceAll('\r\n', '\n')
+      // 有些引用是 ScriptRef 和 #ScriptRef
+      html = html.replaceAll('#ScriptRef:', '../ScriptReference/')
+      html = html.replaceAll('ScriptRef:', '../ScriptReference/')
+      // 邮箱
+      html = html.replaceAll('https://docs.unity3d.com/Manual/mailto:assetstore@unity3d.com.html', 'mailto:assetstore@unity3d.com')
+
+      // SpriteAtlas升级
+      if (complex.version.includes('2022')) {
+        // SpriteAtlas -> SpriteAtlasV2
+        html = html.replaceAll('/SpriteAtlas.html', '/SpriteAtlasV2.html')
+      }
+
+      // #udp-distribution.html#languages
+      // html = html.replaceAll('#udp-distribution.html#languages', '../Manual/udp-distribution.html#languages')
+
+      // 替换 url
+      html = html.replaceAll(
+        '%5Bhttps://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN%5D(https://help.apple.com/xcode/mac/11.4/index.html?localePath=en.lproj#/devbc48d1bad)',
+        'https://www.google.com/url?q=https://help.apple.com/xcode/mac/11.4/index.html?localePath%3Den.lproj%23/devbc48d1bad&amp;sa=D&amp;source=docs&amp;ust=1636108271363000&amp;usg=AOvVaw2aFjxlOtLMPIBWV1qeXNRN'
+      )
+
+      // 对表格优化 换行处理
+      html = html.replaceAll('<br>', '{{BR}}')
+
+      // 如果 </colgroup> 和 <tbody> 之间有 <thead> 就是带 title 的表格
+      html = html.replaceAll(/<colgroup>\n((.|\n)*?)<tbody>/g, function (rep, $1) {
+        if ($1.includes('<thead>')) {
+          return rep
+        }
+        // 判断有多少行
+
+        let col_count = rep.match(/\n/g).length - 3
+        if (col_count > 0) {
+          let thead = '<thead>\n<tr>\n'
+          for (let index = 0; index < col_count; index++) {
+            if (index == 0) {
+              thead += '\t<th style="text-align:left;"><strong>Topic</strong></th>\n'
+            } else {
+              thead += '\t<th style="text-align:left;"><strong>描述</strong></th>\n'
+            }
+          }
+          thead += '</tr>\n</thead>\n\n\<tbody>\n'
+          rep = rep.replaceAll('<tbody>', thead)
+        }
+        return rep
+      })
+
+      if (complex.root === 'ScriptReference') {
+        html = html.replaceAll('<a href="" class="switch-link gray-btn sbtn left hide">切换到手册</a>', '')
+        html = html.replaceAll('<pre class="codeExampleCS">', '<pre class="codeExampleCS"> {{CODE-START}}')
+        html = html.replaceAll('</pre>', '{{CODE-END}} </pre>')
+      }
+
+      Tools.writeFile(complex.postHtml, html, callback)
+    })
+  }, 1)
+  let count = 0
+  for (const language in complexList) {
+    for (const version in complexList[language]) {
+      for (const root in complexList[language][version]) {
+        for (const index in complexList[language][version][root]) {
+          count++
+          console.log(count)
+          handleQueue.push(complexList[language][version][root][index], function (err) {
+            console.log(count, 'DONE')
+            if (err) {
+              console.log(err)
+            }
+          })
+        }
+      }
+    }
+  }
+
+  handleQueue.drain(() => {
     handleCallback(complexList)
   })
 }
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 后处理 html
+function writeMarkdown(complexList, writeCallback) {
+
+  const handleQueue = Async.queue(function (complex, callback) {
+    FS.readFile(complex.postHtml, 'utf-8', function (err, html) {
+      let md = gfm.turndown(html)
+
+      // 转义 &
+      md = md.replaceAll('&amp;', '&')
+
+      // 把 < > 转义
+      if (complex.root === 'Manual') {
+        md = md.replaceAll('<', '&lt;')
+        md = md.replaceAll('>', '&gt;')
+      }
+      if (complex.root === 'ScriptReference') {
+        md = md.replaceAll('\\[', '[')
+        md = md.replaceAll('\\]', ']')
+      }
+
+      // \*\*(.*?)\*\*
+      // 对多余 \# 删除
+      md = md.replaceAll('\\# ', '')
+      // 对双下滑线的进行 ** 处理
+      md = md.replaceAll('\\_\\_', '**')
+      md = md.replaceAll(/\*\*(.*?)\*\*/g, function (rep) {
+        // 前后剔除空格后 最后面补一个空格
+        return rep.trim() + ''
+      })
+
+      md = md.replaceAll('{{CODE-START}}', '```csharp')
+      md = md.replaceAll('{{CODE-END}}', '```')
+      // 对表格进行优化
+      md = md.replaceAll('{{BR}}', '<br/>')
+      // 对子属性的选项表格
+      md = md.replaceAll('|  | ', '|  -> ')
+
+
+      // 图片类型链接 -> 改名和改链接
+      md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1) {
+        let name = Path.basename($1)
+        rep = rep.replace('![]', '![' + name + ']')
+        rep = rep.replace('../', Tools.baseURL(complex.language, complex.version))
+        return rep
+      })
+
+      Tools.writeFile(complex.preMark, md, callback)
+    })
+  }, 1)
+  for (const language in complexList) {
+    for (const version in complexList[language]) {
+      for (const root in complexList[language][version]) {
+        for (const index in complexList[language][version][root]) {
+          handleQueue.push(complexList[language][version][root][index], function (err) {
+            if (err) {
+              console.log(err)
+            }
+          })
+        }
+      }
+    }
+  }
+
+  handleQueue.drain(() => {
+    writeCallback(complexList)
+  })
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function handleMarkdown(complexList, handleCallback) {
+  const handleQueue = Async.queue(function (complex, callback) {
+    // 判断临时文件是否存在
+
+    let writeStream = FS.createWriteStream(complex.postMark, 'utf-8')
+    let readStream = FS.createReadStream(complex.preMark, 'utf-8')
+    let reader = ReadLine.createInterface(readStream)
+
+    reader.on('line', function (line) {
+      line = line.replaceAll(/^\[\d*?\]: (.+)/g, function (rep, ref, $2) {
+        // 是 链接
+        if (ref.match(/http(s)?:\/\/([\w-]+[\.|\:])+[\w-]+(\/[\w.\/?%&#=]*)?/g)) {
+          // TODO: 对同类型的链接
+          // if (ref.includes('docs.unity3d.com')) {
+          //   if (ref.includes('ScriptReference')) {
+          //     console.log('是脚本链接', ref)
+          //   } else if (ref.includes('Manual')) {
+          //     console.log('是手册链接', ref)
+          //   } else {
+          //     console.log('是其他链接', ref)
+          //   }
+          // } else {
+          //   console.log('不是文档', ref)
+          // }
+          return ref
+        } else {
+          if (Path.extname(ref).length > 0) {
+
+          } else {
+            if (ref.startsWith('#')) {
+
+            } else {
+              console.log('引用', ref)
+            }
+          }
+        }
+        return rep
+      })
+      writeStream.write(line + OS.EOL)
+    })
+    reader.on('close', function () {
+      writeStream.close(callback)
+    })
+  }, 1)
+  for (const language in complexList) {
+    for (const version in complexList[language]) {
+      for (const root in complexList[language][version]) {
+        for (const index in complexList[language][version][root]) {
+          handleQueue.push(complexList[language][version][root][index], function (err) {
+            if (err) {
+              console.log(err)
+            }
+          })
+        }
+      }
+    }
+  }
+
+  handleQueue.drain(() => {
+    handleCallback(complexList)
+  })
+}
+
+
+// 引用链接
+
+// 换行读取
+
+// md = md.replaceAll(/\[\d*?\]: (\S+)/g, function (rep, ref, $2) {
+//   // 是 链接
+//   if (ref.match(/http(s)?:\/\/([\w-]+[\.|\:])+[\w-]+(\/[\w.\/?%&#=]*)?/g)) {
+//     // TODO: 对同类型的链接
+//     // if (ref.includes('docs.unity3d.com')) {
+//     //   if (ref.includes('ScriptReference')) {
+//     //     console.log('是脚本链接', ref)
+//     //   } else if (ref.includes('Manual')) {
+//     //     console.log('是手册链接', ref)
+//     //   } else {
+//     //     console.log('是其他链接', ref)
+//     //   }
+//     // } else {
+//     //   console.log('不是文档', ref)
+//     // }
+//     return ref
+//   } else {
+//     if (Path.extname(ref).length > 0) {
+//
+//     } else {
+//       if (ref.startsWith('#')) {
+//
+//       } else {
+//         console.log('引用', ref)
+//       }
+//     }
+//   }
+//   return rep
+// })
+// console.log('引用链接数:', urlCount)
+
+// 对 ![](http://xxx.xx) -> ![xxx.xx](http://xxx.xx)
+// 图片命名
+// md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1) {
+//   let name = Path.basename($1)
+//   rep = rep.replaceAll('![]', '![' + name + ']')
+//   return rep
+// })
+
+// 对链接优化
+// 首先对链接统一化
+// md = md.replaceAll(Too + '/StaticFilesManual/')
+
+// 针对锚点 有 # 号
+// md = md.replaceAll(/(]: (.+\.html)?#)(.+)/g, function (rep, $1, targetFile, tag) {
+//   // 首先判断 targetFile 有没有值
+//   if (targetFile !== undefined) {
+//     if (targetFile.startsWith('http://') || targetFile.startsWith('https://')) {
+//       // 完整网站的不管
+//       return rep
+//     }
+//     let targetName = targetFile.replaceAll(Path.extname(targetFile), '')
+//     // 说明用的是别人的锚点
+//     let targetComplex = complexList[complex.language][complex.version][complex.root].find(function (t) {
+//       return t.link == targetName
+//     })
+//     if (targetComplex === undefined) {
+//       // 没有目标文件 返回在线地址
+//       return ']: ' + Tools.baseURL(complex.language, complex.version, complex.root, '/' + targetFile) + '#' + tag
+//     }
+//     if (targetComplex.anchors[tag] === undefined) {
+//       // 不存在这个锚点
+//       return ']: ' + targetComplex.url
+//     }
+//     return ']: ' + targetComplex.url + '#' + targetComplex.anchors[tag]
+//   }
+//   if (complex.anchors[tag] === undefined) {
+//     // 本文件都不存在这个锚点
+//     return ']: ' + complex.url
+//   }
+//   return ']: ' + '#' + complex.anchors[tag]
+// })
