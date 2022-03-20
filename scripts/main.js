@@ -284,6 +284,8 @@ function handleHtml(complexList, handleCallback) {
       // 有些引用是 ScriptRef 和 #ScriptRef
       html = html.replaceAll('#ScriptRef:', '../ScriptReference/')
       html = html.replaceAll('ScriptRef:', '../ScriptReference/')
+      html = html.replaceAll('SciptRef:', '../ScriptReference/')
+      html = html.replaceAll('ScriptReference:', '../ScriptReference/')
       // 邮箱
       html = html.replaceAll('https://docs.unity3d.com/Manual/mailto:assetstore@unity3d.com.html', 'mailto:assetstore@unity3d.com')
 
@@ -337,15 +339,11 @@ function handleHtml(complexList, handleCallback) {
       Tools.writeFile(complex.postHtml, html, callback)
     })
   }, 1)
-  let count = 0
   for (const language in complexList) {
     for (const version in complexList[language]) {
       for (const root in complexList[language][version]) {
         for (const index in complexList[language][version][root]) {
-          count++
-          console.log(count)
           handleQueue.push(complexList[language][version][root][index], function (err) {
-            console.log(count, 'DONE')
             if (err) {
               console.log(err)
             }
@@ -401,9 +399,12 @@ function writeMarkdown(complexList, writeCallback) {
 
 
       // 图片类型链接 -> 改名和改链接
-      md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1) {
-        let name = Path.basename($1)
-        rep = rep.replace('![]', '![' + name + ']')
+      md = md.replaceAll(/\!\[(.*)\]\((.*?)\)/g, function (rep, $1, $2) {
+        let name = Path.basename($2)
+        if ($1.length == 0) {
+          rep = rep.replace('![]', '![' + name + ']')
+        }
+        console.log($1)
         rep = rep.replace('../', Tools.baseURL(complex.language, complex.version))
         return rep
       })
@@ -435,14 +436,15 @@ function handleMarkdown(complexList, handleCallback) {
   const handleQueue = Async.queue(function (complex, callback) {
     // 判断临时文件是否存在
 
+    Tools.writeFile(complex.postMark, '')
     let writeStream = FS.createWriteStream(complex.postMark, 'utf-8')
     let readStream = FS.createReadStream(complex.preMark, 'utf-8')
     let reader = ReadLine.createInterface(readStream)
 
     reader.on('line', function (line) {
-      line = line.replaceAll(/^\[\d*?\]: (.+)/g, function (rep, ref, $2) {
+      line = line.replaceAll(/^\[\d*?\]: (.+)/g, function (lineRep, lineReference) {
         // 是 链接
-        if (ref.match(/http(s)?:\/\/([\w-]+[\.|\:])+[\w-]+(\/[\w.\/?%&#=]*)?/g)) {
+        if (lineReference.match(/http(s)?:\/\/([\w-]+[\.|\:])+[\w-]+(\/[\w.\/?%&#=]*)?/g)) {
           // TODO: 对同类型的链接
           // if (ref.includes('docs.unity3d.com')) {
           //   if (ref.includes('ScriptReference')) {
@@ -455,19 +457,38 @@ function handleMarkdown(complexList, handleCallback) {
           // } else {
           //   console.log('不是文档', ref)
           // }
-          return ref
+          return lineRep
         } else {
-          if (Path.extname(ref).length > 0) {
+          // 预先处理
+          let newReference = lineReference
+          newReference = newReference.replaceAll('%E2%80%8B%E2%80%8B', '')
+          newReference = newReference.replaceAll('../', './')
+          newReference = newReference.replaceAll('E./', './')
+          newReference = newReference.replaceAll('UI./', './')
 
-          } else {
-            if (ref.startsWith('#')) {
 
+          if (newReference.match(/(.*?)#(.+)/g)) {
+            // 必然 指代的是锚点
+            newReference = newReference.replaceAll(/(.*?)#(.+)/g, function (rep, file, tag) {
+              let ref = toFileReference(file, complex, complexList)
+              let anchor = toFileAnchor(tag, file, complex, complexList)
+              if (anchor) {
+                return ref + '#' + anchor
+              }
+              return ref
+            })
+          } else if (newReference.match(/(.+).html/g)) {
+            // 必定文件
+            if (!newReference.endsWith('.html')) {
+              console.log(newReference)
             } else {
-              console.log('引用', ref)
+              newReference = toFileReference(newReference, complex, complexList)
             }
           }
+          lineRep = lineRep.replaceAll(lineReference, newReference)
+          return lineRep
         }
-        return rep
+        return lineRep
       })
       writeStream.write(line + OS.EOL)
     })
@@ -492,6 +513,112 @@ function handleMarkdown(complexList, handleCallback) {
   handleQueue.drain(() => {
     handleCallback(complexList)
   })
+}
+
+
+// 转化为锚点
+function toFileAnchor(tag, file, complex, complexList) {
+  let name
+  if (file.length > 0) {
+    name = checkName(getFileName(file))
+  } else {
+    name = complex.link
+  }
+  let root = getFileRoot(file, complex)
+  let list = complexList[complex.language][complex.version][root]
+  if (list === undefined) {
+    console.log(name)
+    return undefined
+  }
+  // 开始查找
+  let targetComplex = list.find(function (t) {
+    return t.link == name || t.anchor_link == name
+  })
+  if (targetComplex === undefined) {
+    console.log(name)
+    return undefined
+  }
+  if (targetComplex.anchors[tag]) {
+    return targetComplex.anchors[tag]
+  }
+
+  return undefined
+}
+
+// 转化为文件路径
+function toFileReference(file, complex, complexList) {
+  if (file.length > 0) {
+    let name = checkName(getFileName(file))
+    let root = getFileRoot(file, complex)
+    let list = complexList[complex.language][complex.version][root]
+    if (list === undefined) {
+      console.log(name)
+      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
+    }
+    // 开始查找
+    let targetComplex = list.find(function (t) {
+      return t.link == name || t.anchor_link == name
+    })
+    if (targetComplex === undefined) {
+      console.log(name)
+      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
+    }
+    return targetComplex.url
+  } else {
+    // 没有名字的就是以 自身 为文件路径寻找锚点
+    return file
+  }
+}
+
+
+// 获取文件的 root
+function getFileRoot(file, complex) {
+  let ext = Path.extname(file)
+  if (ext.length === 0) {
+    ext = '.html'
+    file = file + ext
+  }
+  let path = Path.dirname(file)
+  let root = complex.root
+  if (path !== '.') {
+    if (path.includes('ScriptReference')) {
+      root = 'ScriptReference'
+    }
+    if (path.includes('Manual')) {
+      root = 'Manual'
+    }
+  }
+  return root
+}
+
+// 获取文件名
+function getFileName(file) {
+  let ext = Path.extname(file)
+  if (ext.length === 0) {
+    ext = '.html'
+    file = file + ext
+  }
+  let name = Path.basename(file).replace(ext, '')
+  name = checkName(name)
+  return name
+}
+
+const mdNameModifyList = {
+  'parallelimport': 'parallel-import',
+  'OnlineActivationGuide': 'manual-activation-guide',
+  'class-PlayerSettingsStandalone': 'class-player-settings',
+  'tvOS': 'tv-os-introducing',
+  'search-expressions-functions-ref': 'search-expression-functions-ref',
+  'UnityIAPXiaomi': 'unity-iap',
+  'BuildOptions.CompressWithLz4': 'build-options',
+};
+
+// 检查文件名
+function checkName(name) {
+  if (mdNameModifyList[name]) {
+    return mdNameModifyList[name]
+  }
+  return name
 }
 
 
