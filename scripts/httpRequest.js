@@ -8,16 +8,16 @@ let https = require("https"); // 引入http模块
  * @param headers
  * @param encoding 可选值： utf8 binary
  */
-exports.sendHttpRequest = function(url, port, route, headers = {}, encoding = 'utf-8') {
+exports.sendHttpRequest = function (url, port, route, headers = {}, encoding = 'utf-8') {
   let data = '';
   return new Promise(function (resolve, reject) {
-    let req = https.get(url, function(res) {
+    let req = https.get(url, function (res) {
       res.setEncoding(encoding);
-      res.on('data', function(chunk) {
+      res.on('data', function (chunk) {
         data += chunk;
       });
 
-      res.on('end', function() {
+      res.on('end', function () {
         resolve({result: true, data: data});
       });
     });
@@ -29,10 +29,29 @@ exports.sendHttpRequest = function(url, port, route, headers = {}, encoding = 'u
   });
 }
 
-// // 请求例子
-// let res = co(function* () {
-//   let req_res = yield sendHttpRequest('www.video.com', 80, '/mobile/Test/phpinfo');
-//   console.log(req_res);
-// });
-// console.log(res);
-// console.log('123');
+/**
+ * http模块发送请求
+ * @param host
+ * @param port
+ * @param route
+ * @param headers
+ * @param encoding 可选值： utf8 binary
+ */
+exports.sendHttpRequestAsync = function (url, callback) {
+  let data = '';
+  let req = https.get(url, function (res) {
+    res.setEncoding('utf-8');
+    res.on('data', function (chunk) {
+      data += chunk;
+    });
+
+    res.on('end', function () {
+      callback(true, data)
+    });
+  });
+
+  req.on('error', (e) => {
+    callback(false, e.message)
+  });
+  req.end();
+}

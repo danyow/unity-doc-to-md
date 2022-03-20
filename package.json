@@ -4,6 +4,8 @@
   "main": "index.js",
   "license": "MIT",
   "dependencies": {
+    "async": "^3.2.3",
+    "bagpipe": "^0.3.5",
     "turndown": "^7.1.1",
     "turndown-plugin-gfm": "^1.0.2"
   }
