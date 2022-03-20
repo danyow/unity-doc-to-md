@@ -34,7 +34,9 @@ function main() {
   request(function (linkConfigs) {
     toSimpleList(linkConfigs, function (simpleList) {
       toComplexList(simpleList, function (complexList) {
-        handleHtml(complexList)
+        handleHtml(complexList, function () {
+          console.log('全部转换完成!!')
+        })
       })
     })
   })
@@ -120,9 +122,11 @@ function toComplexList(simpleList, callback) {
     const anchor_title = Tools.transformToAnchor(simple.title)
     const anchor_links = links.map(Tools.transformToAnchor)
     const anchor_titles = titles.map(Tools.transformToAnchor)
+    const url = Path.join(...anchor_links, anchor_link + '.md')
     const source = Tools.basePath(language, version, root, link + '.html')
     const temp = Tools.basePath('temp', language, version, root, ...anchor_links, anchor_link + '.html')
-    const target = Tools.basePath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
+    // const target = Tools.basePath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
+    const target = Tools.selfPath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
 
 
     let anchors = []
@@ -137,11 +141,11 @@ function toComplexList(simpleList, callback) {
 
     FS.readFile(source, 'utf-8', function (err, html) {
       if (err === null) {
-        for (const match of html.matchAll(/<a href="#(.+)">(.+)<\/a>/g)) {
+        for (const match of html.matchAll(/<a href="#(.*?)">(.*?)<\/a>/g)) {
           checkKey(match[1], match[2])
         }
 
-        for (const match of html.matchAll(/<a name="(.+)">.+[\r\n]+<h\d>(.+)<\/h\d>/g)) {
+        for (const match of html.matchAll(/<a name="(.*?)">.+[\r\n]+<h\d>(.*?)<\/h\d>/g)) {
           checkKey(match[1], match[2])
         }
         // 直接返回一个复杂数据
@@ -157,6 +161,7 @@ function toComplexList(simpleList, callback) {
           anchor_title: anchor_title,
           anchor_links: anchor_links,
           anchor_titles: anchor_titles,
+          url: url,
           source: source,
           temp: temp,
           target: target,
@@ -290,10 +295,10 @@ function handleHtml(complexList, handleCallback) {
 
           //////////////////////////////////////////////////////////////////////////////
           let md = gfm.turndown(html)
-          const baseURL = Tools.baseURL(complex.language, complex.version, complex.root)
-          md = md.replaceAll('../StaticFilesManual/', baseURL + '/StaticFilesManual/')
-          md = md.replaceAll('../StaticFiles/', baseURL + '/StaticFiles/')
-          md = md.replaceAll('../uploads/', baseURL + '/uploads/')
+          // const baseURL = Tools.baseURL(complex.language, complex.version)
+          // md = md.replaceAll('../StaticFilesManual/', baseURL + '/StaticFilesManual/')
+          // md = md.replaceAll('../StaticFiles/', baseURL + '/StaticFiles/')
+          // md = md.replaceAll('../uploads/', baseURL + '/uploads/')
 
           // 转义 &
           md = md.replaceAll('&amp;', '&')
@@ -331,6 +336,43 @@ function handleHtml(complexList, handleCallback) {
           md = md.replaceAll('{{BR}}', '<br/>')
           // 对子属性的选项表格
           md = md.replaceAll('|  | ', '|  -> ')
+
+
+          // 对链接优化
+          // 首先对链接统一化
+          // md = md.replaceAll(Too + '/StaticFilesManual/')
+
+          // 针对锚点 有 # 号
+          md = md.replaceAll(/(]: (.+\.html)?#)(.+)/g, function (rep, $1, targetFile, tag) {
+            // 首先判断 targetFile 有没有值
+            if (targetFile !== undefined) {
+              if (targetFile.startsWith('http://') || targetFile.startsWith('https://')) {
+                // 完整网站的不管
+                return rep
+              }
+              let targetName = targetFile.replaceAll(Path.extname(targetFile), '')
+              // 说明用的是别人的锚点
+              let targetComplex = complexList[complex.language][complex.version][complex.root].find(function (t) {
+                return t.link == targetName
+              })
+              if (targetComplex === undefined) {
+                // 没有目标文件 返回在线地址
+                return ']: ' + Tools.baseURL(complex.language, complex.version, complex.root, '/' + targetFile) + '#' + tag
+              }
+              if (targetComplex.anchors[tag] === undefined) {
+                // 不存在这个锚点
+                return ']: ' + targetComplex.url
+              }
+              return ']: ' + targetComplex.url + '#' + targetComplex.anchors[tag]
+            }
+            if (complex.anchors[tag] === undefined) {
+              // 本文件都不存在这个锚点
+              return ']: ' + complex.url
+            }
+            return ']: ' + '#' + complex.anchors[tag]
+          })
+
+
           if (!FS.existsSync(complex.target)) {
             FS.mkdirSync(Path.dirname(complex.target), {recursive: true})
           }

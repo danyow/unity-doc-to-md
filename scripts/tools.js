@@ -41,10 +41,14 @@ exports.each = function (configs, preObjects, callback) {
 
 
 // to url
-exports.baseURL = function (language, version, root, args = '') {
+exports.baseURL = function (language, version, root = '', args = '') {
   return 'https://docs.unity3d.com/' + language + '/' + version + '/' + root + args
 }
 
+// 返回路径 但是没有
+exports.currentBaseURL = function (language, version, root = '', args = '') {
+  return 'https://docs.unity3d.com/' + language + '/' + version + '/' + root + args
+}
 
 // to path
 exports.basePath = function (language, version, root, ...args) {
@@ -56,3 +60,6 @@ exports.otherPath = function (other, language, version, root, ...args) {
   return Path.resolve('../unity_doc/', other, language, version, root, ...args)
 }
 
+exports.selfPath = function (other, language, version, root, ...args) {
+  return Path.resolve('../doc-unity-manual/docs/', root, ...args)
+}
