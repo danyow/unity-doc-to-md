@@ -43,20 +43,36 @@ exports.each = function (configs, index, preObjects, callback) {
 }
 
 
-exports.writeFile = function (path, content = '', callback) {
+exports.writeFile = function (path, content = '', callback, encoding = 'utf-8') {
   if (!fs.existsSync(Path.dirname(path))) {
     fs.mkdirSync(Path.dirname(path), {recursive: true})
   }
   if (content === '' || callback === undefined) {
-    fs.writeFileSync(path, content, 'utf-8')
+    fs.writeFileSync(path, content, encoding)
     if (callback) {
       callback()
     }
   } else {
-    fs.writeFile(path, content, 'utf-8', callback)
+    fs.writeFile(path, content, encoding, callback)
   }
 }
 
+const downloadLanguages = {
+  cn: 'zh-cn',
+}
+
+exports.downURL = function (language, version) {
+  if (language === 'en') {
+    // https://storage.googleapis.com/docscloudstorage/2022.1/UnityDocumentation.zip
+    return 'https://storage.googleapis.com/docscloudstorage/' + version + '/UnityDocumentation.zip'
+  } else {
+    // https://storage.googleapis.com/localized_docs/zh-cn/2022.1/UnityDocumentation.zip
+    if (downloadLanguages[language]) {
+      return 'https://storage.googleapis.com/localized_docs/' + downloadLanguages[language] + '/' + version + '/UnityDocumentation.zip'
+    }
+    return 'https://storage.googleapis.com/localized_docs/' + language + '/' + version + '/UnityDocumentation.zip'
+  }
+}
 
 // to url
 exports.baseURL = function (language, version, root = '', args = '') {
@@ -65,14 +81,13 @@ exports.baseURL = function (language, version, root = '', args = '') {
 
 // to path
 exports.basePath = function (language, version, root, ...args) {
-  return Path.resolve('../unity_doc/', language, version, root, ...args)
-}
-
-// other path
-exports.otherPath = function (other, language, version, root, ...args) {
-  return Path.resolve('../unity_doc/', other, language, version, root, ...args)
+  if (root) {
+    return Path.resolve('./build', language, version, root, ...args)
+  } else {
+    return Path.resolve('./build', language, version, ...args)
+  }
 }
 
 exports.selfPath = function (other, language, version, root, ...args) {
-  return Path.resolve('../doc-unity-manual/docs/', root, ...args)
+  return Path.resolve('../doc-unity-manual/docs/', ...args)
 }

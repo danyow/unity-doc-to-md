@@ -13,6 +13,7 @@ const ReadLine = require('readline')
 
 const TService = require("turndown")
 const TPlugin = require('turndown-plugin-gfm')
+const StreamZip = require('node-stream-zip')
 
 const Tools = require('./tools')
 const HttpRequest = require('./httpRequest')
@@ -31,14 +32,18 @@ gfm.use([TPlugin.tables, TPlugin.strikethrough])
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function main() {
-  request(function (linkConfigs) {
-    toSimpleList(linkConfigs, function (simpleList) {
-      toComplexList(simpleList, function (complexList) {
-        writeHtml(complexList, function (complexList) {
-          handleHtml(complexList, function (complexList) {
-            writeMarkdown(complexList, function (complexList) {
-              handleMarkdown(complexList, function (complexList) {
-                console.log('全部转换完成!!')
+  download(function (languages, versions) {
+    readCompression(languages, versions, function (languages, versions, reader) {
+      request(languages, versions, function (linkConfigs) {
+        toSimpleList(linkConfigs, function (simpleList) {
+          toComplexList(simpleList, reader, function (complexList) {
+            writeHtml(complexList, function (complexList) {
+              handleHtml(complexList, function (complexList) {
+                writeMarkdown(complexList, function (complexList) {
+                  handleMarkdown(complexList, function (complexList) {
+                    console.log('全部转换完成!!')
+                  })
+                })
               })
             })
           })
@@ -51,10 +56,77 @@ function main() {
 main()
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// 准备网络请求
-function request(callback) {
+// 下载文件
+function download(downloadCallback) {
+
+  // https://storage.googleapis.com/localized_docs/zh-cn/2022.1/UnityDocumentation.zip
+  // https://storage.googleapis.com/docscloudstorage/2022.1/UnityDocumentation.zip
+
   const languages = ['cn']
   const versions = ['2022.1']
+
+  // 处理网络请求队列
+  const downloadQueue = Async.queue((params, callback) => {
+    // 不存在开启下载
+    if (!FS.existsSync(params.path)) {
+      HttpRequest.sendHttpRequestAsync(params.url, function (isSuccess, data) {
+        Tools.writeFile(params.path, data, callback, 'binary')
+      }, 'binary')
+    } else {
+      callback()
+    }
+  }, 1)
+
+  languages.forEach(language => {
+    versions.forEach(version => {
+      let url = Tools.downURL(language, version)
+      downloadQueue.push({
+        url: url,
+        path: Tools.basePath(language, version, 'doc.zip'),
+      }, function (isSuccess) {
+        if (isSuccess) {
+          console.log('下载成功')
+        }
+      })
+    })
+  })
+  downloadQueue.drain(() => {
+    downloadCallback(languages, versions)
+  })
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 解压
+function readCompression(languages, versions, readCallback) {
+  const decompressionQueue = Async.queue((params, callback) => {
+    const zip = new StreamZip({
+      file: params.file,
+      storeEntries: true,
+      // skipEntryNameValidation: true,
+    });
+    zip.on('ready', () => {
+      callback(zip)
+    });
+  }, 1)
+  let reader
+  languages.forEach(language => {
+    versions.forEach(version => {
+      decompressionQueue.push({
+        file: Tools.basePath(language, version, 'doc.zip'),// Path.resolve('./', language, version, 'doc.zip'),
+        path: Tools.basePath(language, version),
+      }, function (zip) {
+        reader = zip
+      })
+    })
+  })
+  decompressionQueue.drain(() => {
+    readCallback(languages, versions, reader)
+  })
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 准备网络请求
+function request(languages, versions, callback) {
   const roots = [
     'Manual',
     // 'ScriptReference',
@@ -107,7 +179,7 @@ function toSimpleList(linkConfigs, callback) {
         simpleList[language][version][root] = []
         Tools.each(linkConfigs[language][version][root], 0, [], function (config, index, list) {
           let simple = {
-            link: config.link,
+            link: config.link === 'null' ? config.title : config.link,
             title: config.title,
             links: Tools.getValues(list, (obj) => obj.link),
             titles: Tools.getValues(list, (obj) => obj.title),
@@ -123,11 +195,10 @@ function toSimpleList(linkConfigs, callback) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 准备转换成数组
-function toComplexList(simpleList, callback) {
+function toComplexList(simpleList, reader, callback) {
   // 去找有没同名的目录
   function existsSameNameDir(simple, list) {
     let dir = Path.join(...simple.titles, simple.title)
-
     let index = list.findIndex(function (other) {
       let otherDir = Path.join(...other.titles)
       if (otherDir.includes(dir)) {
@@ -158,19 +229,19 @@ function toComplexList(simpleList, callback) {
 
     const into = existsSameNameDir(simple, simpleList[language][version][root])
     const source = Tools.basePath(language, version, root, link + '.html')
-    let url = Path.join(...anchor_titles, anchor_title + '.md')
-    let preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_titles, anchor_title + '.html')
-    let postHtml = Tools.basePath('html-post', language, version, root, ...anchor_titles, anchor_title + '.html')
-    let preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_titles, anchor_title + '.md')
-    // let postMark = Tools.basePath('mark-post', language, version, root, ...anchor_titles, anchor_title + '.md')
-    let postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_titles, anchor_title + '.md')
+    let url = Path.join(...anchor_links, anchor_link + '.md')
+    let preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_links, anchor_link + '.html')
+    let postHtml = Tools.basePath('html-post', language, version, root, ...anchor_links, anchor_link + '.html')
+    let preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_links, anchor_link + '.md')
+    // let postMark = Tools.basePath('mark-post', language, version, root, ...anchor_links, anchor_link + '.md')
+    let postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_links, anchor_link + '.md')
     if (into) {
-      url = Path.join(...anchor_titles, anchor_title, anchor_title + '.md')
-      preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.html')
-      postHtml = Tools.basePath('html-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.html')
-      preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
-      // postMark = Tools.basePath('mark-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
-      postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
+      url = Path.join(...anchor_links, anchor_link, anchor_link + '.md')
+      preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_links, anchor_link, anchor_link + '.html')
+      postHtml = Tools.basePath('html-post', language, version, root, ...anchor_links, anchor_link, anchor_link + '.html')
+      preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_links, anchor_link, anchor_link + '.md')
+      // postMark = Tools.basePath('mark-post', language, version, root, ...anchor_links, anchor_link, anchor_link + '.md')
+      postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_links, anchor_link, anchor_link + '.md')
     }
 
 
@@ -184,42 +255,54 @@ function toComplexList(simpleList, callback) {
       anchors[key] = value
     }
 
-    FS.readFile(source, 'utf-8', function (err, html) {
-      if (err === null) {
-        for (const match of html.matchAll(/<a href="#(.*?)">(.*?)<\/a>/g)) {
-          checkKey(match[1], match[2])
-        }
+    function readFile() {
+      FS.readFile(source, 'utf-8', function (err, html) {
+        if (err === null) {
+          for (const match of html.matchAll(/<a href="#(.*?)">(.*?)<\/a>/g)) {
+            checkKey(match[1], match[2])
+          }
 
-        for (const match of html.matchAll(/<a name="(.*?)">.+[\r\n]+<h\d>(.*?)<\/h\d>/g)) {
-          checkKey(match[1], match[2])
+          for (const match of html.matchAll(/<a name="(.*?)">.+[\r\n]+<h\d>(.*?)<\/h\d>/g)) {
+            checkKey(match[1], match[2])
+          }
+          // 直接返回一个复杂数据
+          callback({
+            anchors: anchors,
+            language: language,
+            version: version,
+            root: root,
+            link: link,
+            title: title,
+            links: links,
+            titles: titles,
+            anchor_link: anchor_link,
+            anchor_title: anchor_title,
+            anchor_links: anchor_links,
+            anchor_titles: anchor_titles,
+            into: into,
+            url: url,
+            source: source,
+            preHtml: preHtml,
+            postHtml: postHtml,
+            preMark: preMark,
+            postMark: postMark,
+          })
+        } else {
+          console.log('文件不存在', source)
+          callback()
         }
-        // 直接返回一个复杂数据
-        callback({
-          anchors: anchors,
-          language: language,
-          version: version,
-          root: root,
-          link: link,
-          title: title,
-          links: links,
-          titles: titles,
-          anchor_link: anchor_link,
-          anchor_title: anchor_title,
-          anchor_links: anchor_links,
-          anchor_titles: anchor_titles,
-          into: into,
-          url: url,
-          source: source,
-          preHtml: preHtml,
-          postHtml: postHtml,
-          preMark: preMark,
-          postMark: postMark,
-        })
-      } else {
-        console.log('文件不存在', source)
-        callback()
+      })
+    }
+
+    if (FS.existsSync(source)) {
+      readFile()
+    } else {
+      let entryPath = Path.join(root, link + '.html').replaceAll('\\', '/')
+      if (!FS.existsSync(Path.dirname(source))) {
+        FS.mkdirSync(Path.dirname(source))
       }
-    })
+      reader.extract(entryPath, source, readFile)
+    }
   }, 1)
 
   for (const language in simpleList) {
@@ -243,6 +326,7 @@ function toComplexList(simpleList, callback) {
   }
 
   handleQueue.drain(() => {
+    reader.close()
     callback(complexList)
   })
 }
@@ -320,6 +404,7 @@ function handleHtml(complexList, handleCallback) {
       // 有些引用是 ScriptRef 和 #ScriptRef
       html = html.replaceAll('#ScriptRef:', '../ScriptReference/')
       html = html.replaceAll('ScriptRef:', '../ScriptReference/')
+      html = html.replaceAll('Scriptref:', '../ScriptReference/')
       html = html.replaceAll('SciptRef:', '../ScriptReference/')
       html = html.replaceAll('ScriptReference:', '../ScriptReference/')
       // 邮箱
@@ -421,9 +506,9 @@ function writeMarkdown(complexList, writeCallback) {
       md = md.replaceAll('\\# ', '')
       // 对双下滑线的进行 ** 处理
       md = md.replaceAll('\\_\\_', '**')
-      md = md.replaceAll(/\*\*(.*?)\*\*/g, function (rep) {
+      md = md.replaceAll(/\*\*(.*?)\*\*/gs, function (rep, $1) {
         // 前后剔除空格后 最后面补一个空格
-        return rep.trim() + ''
+        return ' **' + $1.trim() + '** '
       })
 
       md = md.replaceAll('{{CODE-START}}', '```csharp')
@@ -475,9 +560,22 @@ function handleMarkdown(complexList, handleCallback) {
     // 判断临时文件是否存在
     Tools.writeFile(complex.postMark, '')
     let writeStream = FS.createWriteStream(complex.postMark, 'utf-8')
-    let slug = '---\nid: \'' + complex.link + '\'\ntitle: \'' + complex.title + '\'\n'
+    let slug =
+      '---\n' +
+      'id: ' + complex.link + '\n' +
+      'title: ' + complex.title.replaceAll(':', '') + '\n'
     if (complex.into) {
-      slug += 'slug: \'/' + complex.anchor_title + '\'\n'
+      // 自己就是目录的slug
+      slug += 'slug: /' + complex.anchor_link + '\n'
+    } else {
+      if (complex.anchor_links.length > 0) {
+        // 最后一个目录作为自身的路径
+        let last = complex.anchor_links[complex.anchor_titles.length - 1]
+        if (last === undefined) {
+          console.log()
+        }
+        slug += 'slug: /' + last + '/' + complex.anchor_link + '\n'
+      }
     }
     slug += '---\n\n'
     writeStream.write(slug)
@@ -500,7 +598,6 @@ function handleMarkdown(complexList, handleCallback) {
           // } else {
           //   console.log('不是文档', ref)
           // }
-          return lineRep
         } else {
           // 预先处理
           let newReference = lineReference
@@ -512,6 +609,9 @@ function handleMarkdown(complexList, handleCallback) {
           if (newReference.match(/(.*?)#(.+)/g)) {
             // 必然 指代的是锚点
             newReference = newReference.replaceAll(/(.*?)#(.+)/g, function (rep, file, tag) {
+              if (file === '' || file === undefined) {
+                console.log()
+              }
               let ref = toFileReference(file, complex, complexList)
               let anchor = toFileAnchor(tag, file, complex, complexList)
               if (anchor) {
@@ -519,13 +619,32 @@ function handleMarkdown(complexList, handleCallback) {
               }
               return ref
             })
-          } else if (newReference.match(/.*.html/g)) {
-            newReference = newReference.replaceAll(/.*.html/g, function (rep) {
+          } else if (newReference.includes('30_search')) {
+            newReference = newReference.replaceAll(/(.*.html)/g, function (rep) {
               return toFileReference(rep, complex, complexList)
             })
+          } else if (newReference.match(/(.*.html|.*.md)/g)) {
+            newReference = newReference.replaceAll(/(.*.html|.*.md)/g, function (rep) {
+              return toFileReference(rep, complex, complexList)
+            })
+          } else if (newReference.match(/(^\.\/.*)/gm)) {
+            // 多行模式匹配 ./
+            newReference = newReference.replaceAll(/(^\.\/.*)/g, function (rep) {
+              return toFileReference(rep, complex, complexList)
+            })
+          } else if (newReference.includes('mailto:')) {
+
+          } else {
+            // 只有名字  可能是锚点 也可能是 文件
+            let anchor = toFileAnchor(newReference, '', complex, complexList)
+            if (anchor) {
+              newReference = '#' + anchor
+            } else {
+              let ref = toFileReference(newReference + '.html', complex, complexList)
+              newReference = ref
+            }
           }
           lineRep = lineRep.replaceAll(lineReference, newReference)
-          return lineRep
         }
         return lineRep
       })
@@ -557,8 +676,7 @@ function handleMarkdown(complexList, handleCallback) {
 
 // 转化为锚点
 function toFileAnchor(tag, file, complex, complexList) {
-  let root = getFileRoot(file, complex)
-  let targetComplex = findListAndComplex(root, complex, complexList)
+  let targetComplex = findListAndComplex(file, complex, complexList)
   if (targetComplex === undefined) {
     return undefined
   }
@@ -572,10 +690,20 @@ function toFileAnchor(tag, file, complex, complexList) {
 function toFileReference(file, complex, complexList) {
   if (file.length > 0) {
     let name = getFileName(file, complex)
+    let ext = getFileExtName(file)
     let root = getFileRoot(file, complex)
     let targetComplex = findListAndComplex(file, complex, complexList)
     if (targetComplex === undefined) {
-      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
+      // 反正找不到 编
+      if (name.includes('.') && !name.includes('-')) {
+        // 大概率脚本
+        return Tools.baseURL(complex.language, complex.version, 'ScriptReference', '/' + name + ext)
+      }
+      if (name.includes('-')) {
+        return Tools.baseURL(complex.language, complex.version, 'Manual', '/' + name + ext)
+      }
+      // console.log('反正找不到', name, ext)
+      return Tools.baseURL(complex.language, complex.version, root, '/' + name + ext)
     }
     return targetComplex.url
   } else {
@@ -586,12 +714,10 @@ function toFileReference(file, complex, complexList) {
 
 // 找到匹配的复杂对象
 function findListAndComplex(file, complex, complexList) {
-  let name
-  if (file.length > 0) {
-    name = checkName(getFileName(file))
-  } else {
-    name = complex.link
+  if (file.length === 0) {
+    return complex
   }
+  let name = checkName(getFileName(file, complex))
   let root = getFileRoot(file, complex)
   let list = complexList[complex.language][complex.version][root]
   if (list === undefined) {
@@ -635,7 +761,11 @@ function getFileName(file, complex) {
   let ext = Path.extname(file)
   if (ext.length === 0) {
     ext = '.html'
-    file = file + ext
+    if (file.endsWith('/')) {
+      file = file + 'index' + ext
+    } else {
+      file = file + ext
+    }
   }
   let name = Path.basename(file).replace(ext, '')
   name = checkName(name)
@@ -643,6 +773,21 @@ function getFileName(file, complex) {
     return complex.link
   }
   return name
+}
+
+// 获取文件扩展名
+function getFileExtName(file) {
+  let ext = Path.extname(file)
+  if (ext.length === 0) {
+    ext = '.html'
+  }
+  if (ext === '.md') {
+    ext = '.html'
+  }
+  if (!ext.match(/\.(zip|html|png|jpg|md)/g)) {
+    ext = '.html'
+  }
+  return ext
 }
 
 const mdNameModifyList = {
@@ -665,81 +810,3 @@ function checkName(name) {
   }
   return name
 }
-
-
-// 引用链接
-
-// 换行读取
-
-// md = md.replaceAll(/\[\d*?\]: (\S+)/g, function (rep, ref, $2) {
-//   // 是 链接
-//   if (ref.match(/http(s)?:\/\/([\w-]+[\.|\:])+[\w-]+(\/[\w.\/?%&#=]*)?/g)) {
-//     // TODO: 对同类型的链接
-//     // if (ref.includes('docs.unity3d.com')) {
-//     //   if (ref.includes('ScriptReference')) {
-//     //     console.log('是脚本链接', ref)
-//     //   } else if (ref.includes('Manual')) {
-//     //     console.log('是手册链接', ref)
-//     //   } else {
-//     //     console.log('是其他链接', ref)
-//     //   }
-//     // } else {
-//     //   console.log('不是文档', ref)
-//     // }
-//     return ref
-//   } else {
-//     if (Path.extname(ref).length > 0) {
-//
-//     } else {
-//       if (ref.startsWith('#')) {
-//
-//       } else {
-//         console.log('引用', ref)
-//       }
-//     }
-//   }
-//   return rep
-// })
-// console.log('引用链接数:', urlCount)
-
-// 对 ![](http://xxx.xx) -> ![xxx.xx](http://xxx.xx)
-// 图片命名
-// md = md.replaceAll(/\!\[\]\((.*?)\)/g, function (rep, $1) {
-//   let name = Path.basename($1)
-//   rep = rep.replaceAll('![]', '![' + name + ']')
-//   return rep
-// })
-
-// 对链接优化
-// 首先对链接统一化
-// md = md.replaceAll(Too + '/StaticFilesManual/')
-
-// 针对锚点 有 # 号
-// md = md.replaceAll(/(]: (.+\.html)?#)(.+)/g, function (rep, $1, targetFile, tag) {
-//   // 首先判断 targetFile 有没有值
-//   if (targetFile !== undefined) {
-//     if (targetFile.startsWith('http://') || targetFile.startsWith('https://')) {
-//       // 完整网站的不管
-//       return rep
-//     }
-//     let targetName = targetFile.replaceAll(Path.extname(targetFile), '')
-//     // 说明用的是别人的锚点
-//     let targetComplex = complexList[complex.language][complex.version][complex.root].find(function (t) {
-//       return t.link == targetName
-//     })
-//     if (targetComplex === undefined) {
-//       // 没有目标文件 返回在线地址
-//       return ']: ' + Tools.baseURL(complex.language, complex.version, complex.root, '/' + targetFile) + '#' + tag
-//     }
-//     if (targetComplex.anchors[tag] === undefined) {
-//       // 不存在这个锚点
-//       return ']: ' + targetComplex.url
-//     }
-//     return ']: ' + targetComplex.url + '#' + targetComplex.anchors[tag]
-//   }
-//   if (complex.anchors[tag] === undefined) {
-//     // 本文件都不存在这个锚点
-//     return ']: ' + complex.url
-//   }
-//   return ']: ' + '#' + complex.anchors[tag]
-// })

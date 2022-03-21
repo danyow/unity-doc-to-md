@@ -31,16 +31,14 @@ exports.sendHttpRequest = function (url, port, route, headers = {}, encoding = '
 
 /**
  * http模块发送请求
- * @param host
- * @param port
- * @param route
- * @param headers
+ * @param url
+ * @param callback
  * @param encoding 可选值： utf8 binary
  */
-exports.sendHttpRequestAsync = function (url, callback) {
+exports.sendHttpRequestAsync = function (url, callback, encoding = 'utf-8') {
   let data = '';
   let req = https.get(url, function (res) {
-    res.setEncoding('utf-8');
+    res.setEncoding(encoding);
     res.on('data', function (chunk) {
       data += chunk;
     });
