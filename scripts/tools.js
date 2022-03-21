@@ -8,10 +8,12 @@ exports.transformToAnchor = function (link) {
   anchor = anchor.replaceAll(/\w+/g, function (rep) {
     return rep.toLocaleLowerCase()
   })
-  // 把 # ( ) . / : " < > 换成 '空格'
-  anchor = anchor.replaceAll(/[#().\/:"<>]+/g, function () {
+  // 把 # ( ) （ ） . / : " < > [ ] , 换成 '空格'
+  anchor = anchor.replaceAll(/[\#\(\)\（\）\.\/\:\"\<\>\[\]\,]+/g, function () {
     return ' '
   })
+  // trim
+  anchor = anchor.trim()
   // 把所有 '空格' 变成 -
   anchor = anchor.replaceAll(/\s+/g, function () {
     return '-'
@@ -29,13 +31,13 @@ exports.getValues = function (objs, action) {
 }
 
 // 遍历 附带 前几次的数据 通过 callback 自定义
-exports.each = function (configs, preObjects, callback) {
-  let object = callback(configs, preObjects)
+exports.each = function (configs, index, preObjects, callback) {
+  let object = callback(configs, index, preObjects)
   if (configs.children && configs.children.length > 0) {
     for (let index = 0; index < configs.children.length; index++) {
       let objects = [...preObjects]
       objects.push(object)
-      exports.each(configs.children[index], objects, callback)
+      exports.each(configs.children[index], index, objects, callback)
     }
   }
 }
@@ -45,7 +47,7 @@ exports.writeFile = function (path, content = '', callback) {
   if (!fs.existsSync(Path.dirname(path))) {
     fs.mkdirSync(Path.dirname(path), {recursive: true})
   }
-  if (content === '') {
+  if (content === '' || callback === undefined) {
     fs.writeFileSync(path, content, 'utf-8')
     if (callback) {
       callback()

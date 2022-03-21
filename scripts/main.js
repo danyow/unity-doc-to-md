@@ -75,7 +75,16 @@ function request(callback) {
         let url = Tools.baseURL(language, version, root, '/docdata/toc.json')
         requestQueue.push(url, function (isSuccess, data) {
           if (isSuccess) {
-            linkConfigs[language][version][root] = JSON.parse(data)
+            // 预处理
+            let config = JSON.parse(data)
+            let sameIndex = config.children.findIndex(function (t) {
+              return t.link == config.link
+            })
+            if (sameIndex !== -1) {
+              // 删除了
+              config.children.splice(sameIndex, 1)
+            }
+            linkConfigs[language][version][root] = config
           }
         })
       })
@@ -96,7 +105,7 @@ function toSimpleList(linkConfigs, callback) {
       simpleList[language][version] = {}
       for (const root in linkConfigs[language][version]) {
         simpleList[language][version][root] = []
-        Tools.each(linkConfigs[language][version][root], [], function (config, list) {
+        Tools.each(linkConfigs[language][version][root], 0, [], function (config, index, list) {
           let simple = {
             link: config.link,
             title: config.title,
@@ -115,6 +124,20 @@ function toSimpleList(linkConfigs, callback) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 准备转换成数组
 function toComplexList(simpleList, callback) {
+  // 去找有没同名的目录
+  function existsSameNameDir(simple, list) {
+    let dir = Path.join(...simple.titles, simple.title)
+
+    let index = list.findIndex(function (other) {
+      let otherDir = Path.join(...other.titles)
+      if (otherDir.includes(dir)) {
+        return true
+      }
+      return false
+    })
+    return index !== -1
+  }
+
   // 然后复杂处理 因为有涉及到 锚点
   let complexList = {}
   const handleQueue = Async.queue((params, callback) => {
@@ -128,15 +151,27 @@ function toComplexList(simpleList, callback) {
     const titles = simple.titles
     const anchor_link = Tools.transformToAnchor(simple.link)
     const anchor_title = Tools.transformToAnchor(simple.title)
-    const anchor_links = links.map(Tools.transformToAnchor)
-    const anchor_titles = titles.map(Tools.transformToAnchor)
-    const url = Path.join(...anchor_links, anchor_link + '.md')
+    const anchor_links = links.slice(1, links.length).map(Tools.transformToAnchor)
+    const anchor_titles = titles.slice(1, titles.length).map(Tools.transformToAnchor)
+    // const anchor_links = links.map(Tools.transformToAnchor)
+    // const anchor_titles = titles.map(Tools.transformToAnchor)
+
+    const into = existsSameNameDir(simple, simpleList[language][version][root])
     const source = Tools.basePath(language, version, root, link + '.html')
-    const preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_links, anchor_link + '.html')
-    const postHtml = Tools.basePath('html-post', language, version, root, ...anchor_links, anchor_link + '.html')
-    const preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_links, anchor_link + '.md')
-    // const postMark = Tools.basePath('mark-post', language, version, root, ...anchor_links, anchor_link + '.md')
-    const postMark = Tools.selfPath('mark', language, version, root, ...anchor_links, anchor_link + '.md')
+    let url = Path.join(...anchor_titles, anchor_title + '.md')
+    let preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_titles, anchor_title + '.html')
+    let postHtml = Tools.basePath('html-post', language, version, root, ...anchor_titles, anchor_title + '.html')
+    let preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_titles, anchor_title + '.md')
+    // let postMark = Tools.basePath('mark-post', language, version, root, ...anchor_titles, anchor_title + '.md')
+    let postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_titles, anchor_title + '.md')
+    if (into) {
+      url = Path.join(...anchor_titles, anchor_title, anchor_title + '.md')
+      preHtml = Tools.basePath('html-pre', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.html')
+      postHtml = Tools.basePath('html-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.html')
+      preMark = Tools.basePath('mark-pre', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
+      // postMark = Tools.basePath('mark-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
+      postMark = Tools.selfPath('mark-post', language, version, root, ...anchor_titles, anchor_title, anchor_title + '.md')
+    }
 
 
     let anchors = []
@@ -172,6 +207,7 @@ function toComplexList(simpleList, callback) {
           anchor_title: anchor_title,
           anchor_links: anchor_links,
           anchor_titles: anchor_titles,
+          into: into,
           url: url,
           source: source,
           preHtml: preHtml,
@@ -399,13 +435,15 @@ function writeMarkdown(complexList, writeCallback) {
 
 
       // 图片类型链接 -> 改名和改链接
-      md = md.replaceAll(/\!\[(.*)\]\((.*?)\)/g, function (rep, $1, $2) {
+      // !\[(.*?)\]\((.*?)\)
+      // \!\[(\V*?\S*?)\]\((.*?)\)
+      md = md.replaceAll(/!\[(.*?)\]\((.*?)\)/g, function (rep, $1, $2) {
         let name = Path.basename($2)
         if ($1.length == 0) {
           rep = rep.replace('![]', '![' + name + ']')
         }
-        console.log($1)
         rep = rep.replace('../', Tools.baseURL(complex.language, complex.version))
+        rep = rep.replace('./', Tools.baseURL(complex.language, complex.version))
         return rep
       })
 
@@ -435,9 +473,14 @@ function writeMarkdown(complexList, writeCallback) {
 function handleMarkdown(complexList, handleCallback) {
   const handleQueue = Async.queue(function (complex, callback) {
     // 判断临时文件是否存在
-
     Tools.writeFile(complex.postMark, '')
     let writeStream = FS.createWriteStream(complex.postMark, 'utf-8')
+    let slug = '---\nid: \'' + complex.link + '\'\ntitle: \'' + complex.title + '\'\n'
+    if (complex.into) {
+      slug += 'slug: \'/' + complex.anchor_title + '\'\n'
+    }
+    slug += '---\n\n'
+    writeStream.write(slug)
     let readStream = FS.createReadStream(complex.preMark, 'utf-8')
     let reader = ReadLine.createInterface(readStream)
 
@@ -466,7 +509,6 @@ function handleMarkdown(complexList, handleCallback) {
           newReference = newReference.replaceAll('E./', './')
           newReference = newReference.replaceAll('UI./', './')
 
-
           if (newReference.match(/(.*?)#(.+)/g)) {
             // 必然 指代的是锚点
             newReference = newReference.replaceAll(/(.*?)#(.+)/g, function (rep, file, tag) {
@@ -477,13 +519,10 @@ function handleMarkdown(complexList, handleCallback) {
               }
               return ref
             })
-          } else if (newReference.match(/(.+).html/g)) {
-            // 必定文件
-            if (!newReference.endsWith('.html')) {
-              console.log(newReference)
-            } else {
-              newReference = toFileReference(newReference, complex, complexList)
-            }
+          } else if (newReference.match(/.*.html/g)) {
+            newReference = newReference.replaceAll(/.*.html/g, function (rep) {
+              return toFileReference(rep, complex, complexList)
+            })
           }
           lineRep = lineRep.replaceAll(lineReference, newReference)
           return lineRep
@@ -518,6 +557,35 @@ function handleMarkdown(complexList, handleCallback) {
 
 // 转化为锚点
 function toFileAnchor(tag, file, complex, complexList) {
+  let root = getFileRoot(file, complex)
+  let targetComplex = findListAndComplex(root, complex, complexList)
+  if (targetComplex === undefined) {
+    return undefined
+  }
+  if (targetComplex.anchors[tag]) {
+    return targetComplex.anchors[tag]
+  }
+  return undefined
+}
+
+// 转化为文件路径
+function toFileReference(file, complex, complexList) {
+  if (file.length > 0) {
+    let name = getFileName(file, complex)
+    let root = getFileRoot(file, complex)
+    let targetComplex = findListAndComplex(file, complex, complexList)
+    if (targetComplex === undefined) {
+      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
+    }
+    return targetComplex.url
+  } else {
+    // 没有名字的就是以 自身 为文件路径寻找锚点
+    return file
+  }
+}
+
+// 找到匹配的复杂对象
+function findListAndComplex(file, complex, complexList) {
   let name
   if (file.length > 0) {
     name = checkName(getFileName(file))
@@ -527,7 +595,7 @@ function toFileAnchor(tag, file, complex, complexList) {
   let root = getFileRoot(file, complex)
   let list = complexList[complex.language][complex.version][root]
   if (list === undefined) {
-    console.log(name)
+    // console.log('root 找不到', name)
     return undefined
   }
   // 开始查找
@@ -535,39 +603,10 @@ function toFileAnchor(tag, file, complex, complexList) {
     return t.link == name || t.anchor_link == name
   })
   if (targetComplex === undefined) {
-    console.log(name)
+    // console.log('link 找不到', name)
     return undefined
   }
-  if (targetComplex.anchors[tag]) {
-    return targetComplex.anchors[tag]
-  }
-
-  return undefined
-}
-
-// 转化为文件路径
-function toFileReference(file, complex, complexList) {
-  if (file.length > 0) {
-    let name = checkName(getFileName(file))
-    let root = getFileRoot(file, complex)
-    let list = complexList[complex.language][complex.version][root]
-    if (list === undefined) {
-      console.log(name)
-      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
-    }
-    // 开始查找
-    let targetComplex = list.find(function (t) {
-      return t.link == name || t.anchor_link == name
-    })
-    if (targetComplex === undefined) {
-      console.log(name)
-      return Tools.baseURL(complex.language, complex.version, root, '/' + name)
-    }
-    return targetComplex.url
-  } else {
-    // 没有名字的就是以 自身 为文件路径寻找锚点
-    return file
-  }
+  return targetComplex
 }
 
 
@@ -592,7 +631,7 @@ function getFileRoot(file, complex) {
 }
 
 // 获取文件名
-function getFileName(file) {
+function getFileName(file, complex) {
   let ext = Path.extname(file)
   if (ext.length === 0) {
     ext = '.html'
@@ -600,10 +639,16 @@ function getFileName(file) {
   }
   let name = Path.basename(file).replace(ext, '')
   name = checkName(name)
+  if (name.length == 0) {
+    return complex.link
+  }
   return name
 }
 
 const mdNameModifyList = {
+  '': '',
+  // 'Packages': 'released-packages',
+  // 'UnityOverview': 'interface-overview',
   'parallelimport': 'parallel-import',
   'OnlineActivationGuide': 'manual-activation-guide',
   'class-PlayerSettingsStandalone': 'class-player-settings',
