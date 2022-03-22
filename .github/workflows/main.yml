@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '16'
-          cache: yarn
+      #    cache: yarn
       #- name: 配置环境
       #  run: |
       #    yarn install
